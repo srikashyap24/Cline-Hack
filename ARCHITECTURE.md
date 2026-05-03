@@ -1,48 +1,60 @@
-# Slack AI Assistant Backend Architecture
+# Cline-Hack: System Architecture
 
-This project provides a robust, production-ready backend for a Slack AI assistant designed to simplify technical text based on audience context. It uses an asynchronous MCP-style processing pipeline.
+This project implements a modular, AI-driven Slack assistant that utilizes the **Model Context Protocol (MCP)** and **LangGraph** for autonomous reasoning and text simplification.
 
-## Core Features Implemented
+## 🏗️ High-Level Architecture
 
-### 1. Slack Integration & Reliability
-*   **Endpoint:** Exposes a POST `/slack/simplify` endpoint for Slash Commands.
-*   **Timeouts:** Immediately responds with an ephemeral "Processing..." message to bypass Slack's strict 3-second timeout rule.
-*   **Delayed Responses:** Orchestrates the heavy lifting asynchronously and posts the final results back using the provided `response_url`.
-*   **Security:** Uses standard crypto to verify the `x-slack-signature` against a `SLACK_SIGNING_SECRET`, effectively preventing unauthorized payloads.
+The system is designed with a decoupled architecture, separating the "Reasoning Brain" from the "Tool Registry."
 
-### 2. Processing Pipeline (MCP-style Services)
-The processing is split into modular services orchestrated by `pipeline.js`:
-1.  **Audience Detection (`audienceDetection.js`):** Analyzes the raw text to detect an intended audience (management, marketing, engineering, general) and categorizes whether the input is a new text or a refinement of a previous request.
-2.  **Simplification Service (`simplification.js`):** Formats detailed prompts (using `response_format: { type: 'json_object' }`) instructing the LLM on specific tone rules according to the audience. Can also process follow-up instructions based on the prior state.
-3.  **Accuracy Validation (`accuracyValidation.js`):** A secondary LLM pass compares the original text to the simplified output to ensure no critical facts or figures were lost. If validation fails, the pipeline automatically retries the simplification with a stricter prompt.
-
-### 3. Iterative Refinement & State
-*   **In-Memory Session Context (`sessionContext.js`):** Stores user sessions via a composite key (`userId:channelId`). If a user follows up with "make it shorter", the system detects this intent, retrieves the previous context, and passes it to the LLM to refine the existing output instead of starting over.
-*   **In-Memory Cache:** Avoids repeated identical queries across different users by hashing the `core_text` and `audience` and returning the cached response if available.
-
-### 4. Middleware & Foundations
-*   **Express & Dotenv:** Built on Express.js with environment variables loaded from `.env`.
-*   **Logging:** Centralized structured JSON logging via `winston` for easier debugging and monitoring.
-*   **Error Handling:** A global error-handling middleware is in place, along with graceful fallback messages if the LLM or pipeline fails.
-
-## Directory Structure
-```text
-src/
-├── index.js                     # Express setup and middleware application
-├── controllers/
-│   └── slackController.js       # Handles incoming request mapping and delayed delivery
-├── routes/
-│   └── slack.js                 # Route definitions
-├── services/
-│   ├── accuracyValidation.js    # LLM validation layer
-│   ├── audienceDetection.js     # LLM intent classification
-│   ├── pipeline.js              # Pipeline orchestrator
-│   ├── sessionContext.js        # Cache and session state
-│   └── simplification.js        # Core rewriting logic
-├── utils/
-│   ├── logger.js                # Winston config
-│   └── slackApi.js              # Axios wrapper for Slack
-└── middleware/
-    ├── errorHandler.js          # Global try/catch handler
-    └── verifySlackSignature.js  # Slack webhook signature validation
+```mermaid
+graph LR
+    Slack[Slack API] <--> Agent[Python AI Agent\nLangGraph]
+    Agent <--> MCP[Python MCP Server\nSSE Transport]
+    MCP <--> LLM[OpenRouter / Gemini]
 ```
+
+### 1. Python AI Agent (The Brain)
+- **Framework:** LangGraph / LangChain.
+- **Responsibility:** 
+    - Orchestrates the reasoning loop.
+    - Manages stateful conversations (memory).
+    - Interacts with the Slack API for receiving events and posting responses.
+    - Connects to the MCP server as a client.
+
+### 2. Python MCP Server (The Tools)
+- **Protocol:** Model Context Protocol (MCP) via SSE.
+- **Tools Provided:**
+    - `simplify_text`: Rewrites technical content for a specific audience.
+    - `validate_accuracy`: Ensures factual consistency between source and simplified text.
+- **Integration:** Directly interacts with OpenRouter to leverage Gemini 1.5 Pro/Flash.
+
+## 🛠️ Components
+
+### Audience-Aware Pipeline
+The system doesn't just rewrite text; it follows a cognitive process:
+1.  **Intent Parsing:** Determines the target persona (Management, Engineering, etc.) and specific refinement goals.
+2.  **Tool Execution:** The Agent calls the MCP server's `simplify_text` tool.
+3.  **Verification Loop:** The Agent validates the output using the `validate_accuracy` tool. If accuracy is lost, the agent re-executes the simplification with corrective feedback.
+
+### State Management
+- Session context is maintained to allow for iterative refinements (e.g., "now make it even shorter").
+- LangGraph ensures that the agent remembers the previous version of the text and the audience context.
+
+## 📂 Project Structure
+
+```text
+Cline-Hack/
+├── python-ai-agent/         # LangGraph Reasoning Engine
+│   ├── agent.py             # Main entry point and logic
+│   └── .env.example         # Environment template
+├── python-mcp-server/       # Tool Server
+│   ├── server.py            # MCP server implementation
+│   └── .env.example         # Environment template
+├── README.md                # General setup and overview
+└── ARCHITECTURE.md          # Technical documentation
+```
+
+## 🔐 Security & Reliability
+- **Signature Verification:** Validates Slack requests to ensure they originate from the correct workspace.
+- **Asynchronous Delivery:** Uses Slack's `response_url` to prevent timeouts during long LLM generations.
+- **Error Resilience:** Graceful fallbacks for API failures or invalid input formats.
