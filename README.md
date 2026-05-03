@@ -102,8 +102,3 @@ python agent.py
 2.  **Request URL:** Point to your agent's endpoint (e.g., `https://<your-ngrok-url>/slack/simplify`).
 3.  **Verification:** Ensure `SLACK_SIGNING_SECRET` in `python-ai-agent/.env` matches your Slack App's secret.
 
----
-
-## 📄 License
-
-MIT
